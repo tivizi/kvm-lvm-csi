@@ -1,55 +1,15 @@
-package main
+package pkg
 
 import (
 	"context"
 	"encoding/json"
-	"sync"
 
-	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/glog"
 	"github.com/kubernetes-csi/csi-lib-utils/protosanitizer"
-	"github.com/tivizi/kvm-lvm-csi/endpoint"
 	"google.golang.org/grpc"
 )
 
-func (driver *Driver) Run() error {
-	var wg sync.WaitGroup
-	wg.Add(1)
-	if err := start("unix://tmp/csi.sock", driver, driver, driver); err != nil {
-		return err
-	}
-	wg.Wait()
-	return nil
-}
-
-func start(ep string, ids csi.IdentityServer, cs csi.ControllerServer, ns csi.NodeServer) error {
-	listener, _, err := endpoint.Listen(ep)
-	if err != nil {
-		glog.Fatalf("Failed to listen: %v", err)
-	}
-
-	opts := []grpc.ServerOption{
-		grpc.UnaryInterceptor(logGRPC),
-	}
-	server := grpc.NewServer(opts...)
-
-	if ids != nil {
-		csi.RegisterIdentityServer(server, ids)
-	}
-	if cs != nil {
-		csi.RegisterControllerServer(server, cs)
-	}
-	if ns != nil {
-		csi.RegisterNodeServer(server, ns)
-	}
-
-	glog.Infof("Listening for connections on address: %#v", listener.Addr())
-
-	server.Serve(listener)
-	return nil
-}
-
-func logGRPC(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+func LogGRPC(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 	pri := glog.Level(3)
 	if info.FullMethod == "/csi.v1.Identity/Probe" {
 		// This call occurs frequently, therefore it only gets log at level 5.

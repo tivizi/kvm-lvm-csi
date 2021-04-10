@@ -14,31 +14,79 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package pkg
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/golang/glog"
 	"golang.org/x/net/context"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"k8s.io/utils/mount"
 )
 
 const TopologyKeyNode = "topology.hostpath.csi/node"
 
 func (driver *Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+	targetPath := req.GetTargetPath()
+	mounter := mount.New("")
+	notMount, err := mount.IsNotMountPoint(mounter, targetPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("error checking path %s for mount: %w", targetPath, err)
+		}
+		notMount = true
+	}
+	if !notMount {
+		// It's already mounted.
+		glog.V(5).Infof("Skipping bind-mounting subpath %s: already mounted", targetPath)
+		return &csi.NodePublishVolumeResponse{}, nil
+	}
+
+	meta, err := GetMeta(req.VolumeId)
+	if err != nil {
+		return nil, status.Error(codes.Unavailable, err.Error())
+	}
+
+	if err := mounter.Mount("/dev/"+meta.Name, targetPath, "", []string{}); err != nil {
+		return nil, fmt.Errorf("failed to mount block device: %s at %s: %w", req.VolumeId, targetPath, err)
+	}
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
 func (driver *Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	targetPath := req.TargetPath
 
+	// Unmount only if the target path is really a mount point.
+	if notMnt, err := mount.IsNotMountPoint(mount.New(""), targetPath); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("check target path: %w", err)
+		}
+	} else if !notMnt {
+		// Unmounting the image or filesystem.
+		err = mount.New("").Unmount(targetPath)
+		if err != nil {
+			return nil, fmt.Errorf("unmount target path: %w", err)
+		}
+	}
+	// Delete the mount point.
+	// Does not return error for non-existent path, repeated calls OK for idempotency.
+	if err := os.RemoveAll(targetPath); err != nil {
+		return nil, fmt.Errorf("remove target path: %w", err)
+	}
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 
 func (driver *Driver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-
+	glog.V(5).Infof("Skipping NodeStageVolume...")
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
 func (driver *Driver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
-
+	glog.V(5).Infof("Skipping NodeUnstageVolume...")
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
@@ -85,10 +133,23 @@ func (driver *Driver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetC
 }
 
 func (driver *Driver) NodeGetVolumeStats(ctx context.Context, in *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
-	return nil, nil
+	return &csi.NodeGetVolumeStatsResponse{
+		Usage: []*csi.VolumeUsage{
+			{
+				Available: 0xffff0000,
+				Used:      0xffff,
+				Total:     0xffffffff,
+				Unit:      csi.VolumeUsage_BYTES,
+			},
+		},
+		VolumeCondition: &csi.VolumeCondition{
+			Abnormal: false,
+			Message:  "it's ok from node",
+		},
+	}, nil
 }
 
 // NodeExpandVolume is only implemented so the driver can be used for e2e testing.
 func (driver *Driver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
-	return &csi.NodeExpandVolumeResponse{}, nil
+	return nil, status.Error(codes.Unavailable, "unsupported")
 }

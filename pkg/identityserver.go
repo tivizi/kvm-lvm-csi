@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package pkg
 
 import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -42,7 +42,7 @@ func (driver *Driver) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoR
 }
 
 func (driver *Driver) Probe(ctx context.Context, req *csi.ProbeRequest) (*csi.ProbeResponse, error) {
-	return nil, nil
+	return &csi.ProbeResponse{}, nil
 }
 
 func (driver *Driver) GetPluginCapabilities(ctx context.Context, req *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
